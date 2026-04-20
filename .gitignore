@@ -1,0 +1,21 @@
+# Python virtualenv (large, machine-specific — the macOS Bluetooth setup
+# also copies Python.app in here and re-signs it, which is environment-
+# dependent and not portable).
+.venv/
+venv/
+
+# pip editable-install metadata
+*.egg-info/
+
+# Byte code (already in the top-level .gitignore, but be explicit here
+# since this is a self-contained Python package).
+__pycache__/
+*.pyc
+
+# Phase 2 artifact: captured BLE trace file was committed as
+# docs/ble_fm_rx_trace.md; local runs may also produce stray dumps.
+/tmp-*.txt
+/*.txt
+
+# macOS
+.DS_Store
