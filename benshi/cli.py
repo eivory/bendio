@@ -195,6 +195,196 @@ def _cmd_rfcomm_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _generate_sine_pcm(
+    freq_hz: float, duration_s: float, sample_rate: int = 32000,
+    amplitude: float = 0.2, fade_s: float = 0.005,
+) -> bytes:
+    """Pure-Python sine tone generator with linear fade in/out to avoid
+    click artifacts when stopping/starting abruptly. Returns signed 16-bit
+    little-endian mono bytes."""
+    import math
+    import struct
+    n = int(sample_rate * duration_s)
+    fade_n = max(1, int(sample_rate * fade_s)) if fade_s > 0 else 0
+    peak = amplitude * 32767
+    out = bytearray(n * 2)
+    two_pi_f_over_fs = 2.0 * math.pi * freq_hz / sample_rate
+    for i in range(n):
+        if fade_n > 0 and i < fade_n:
+            env = i / fade_n
+        elif fade_n > 0 and i > n - fade_n:
+            env = max(0.0, (n - i) / fade_n)
+        else:
+            env = 1.0
+        v = int(peak * env * math.sin(two_pi_f_over_fs * i))
+        struct.pack_into("<h", out, i * 2, v)
+    return bytes(out)
+
+
+# Classic Close Encounters of the Third Kind 5-note motif:
+# G4, A4, F4, F3 (octave down), C4 — as scored by John Williams.
+_CE3K_NOTES = [
+    (391.995, 0.45),  # G4 — "re"
+    (440.000, 0.45),  # A4 — "mi"
+    (349.228, 0.45),  # F4 — "do"
+    (174.614, 0.60),  # F3 — "do" (octave lower, held slightly)
+    (261.626, 0.80),  # C4 — "sol" (held for emphasis)
+]
+
+
+def _generate_ce3k_pcm(
+    sample_rate: int = 32000, amplitude: float = 0.3, gap_s: float = 0.1,
+    octave_shift: int = 0,
+) -> bytes:
+    """Build the CE3K motif as one continuous PCM blob.
+
+    ``octave_shift`` multiplies every note by ``2**octave_shift``. Narrowband
+    FM radios apply a ~300 Hz high-pass to the audio path, so the original F3
+    (174.6 Hz) is nearly inaudible on the receiving side; ``octave_shift=1``
+    moves the lowest note up to F4 (349 Hz) where the filter leaves it alone.
+    """
+    multiplier = 2.0 ** octave_shift
+    out = bytearray()
+    silence_bytes = bytes(int(sample_rate * gap_s) * 2)  # s16 mono
+    for i, (freq, dur) in enumerate(_CE3K_NOTES):
+        out.extend(_generate_sine_pcm(
+            freq * multiplier, dur, sample_rate, amplitude))
+        if i < len(_CE3K_NOTES) - 1:
+            out.extend(silence_bytes)
+    return bytes(out)
+
+
+def _cmd_rfcomm_tx_tone(args: argparse.Namespace) -> int:
+    """Phase 3e-1: batch-TX a sine-wave test tone and prove the full TX path."""
+    from .audio import macos_rfcomm as rf
+    from .audio.framing import build_audio_packet, END_OF_TX_PACKET
+    from .audio.sbc import encode_pcm_to_sbc, SbcUnavailable
+
+    if args.preset in ("ce3k", "ce3k-high"):
+        octave = 1 if args.preset == "ce3k-high" else 0
+        label_low = "G4–A4–F4–F3–C4" if octave == 0 else "G5–A5–F5–F4–C5"
+        extra = (
+            ""
+            if octave == 0
+            else " (octave up — fits within narrowband FM's ~300 Hz HPF)"
+        )
+        print(
+            f"Generating Close Encounters of the Third Kind motif "
+            f"({label_low}) at amplitude {args.amplitude}{extra}...",
+            flush=True,
+        )
+        pcm = _generate_ce3k_pcm(
+            sample_rate=32000, amplitude=args.amplitude, octave_shift=octave,
+        )
+    else:
+        print(
+            f"Generating {args.duration:.2f}s of {args.freq:.0f} Hz sine at "
+            f"amplitude {args.amplitude}...",
+            flush=True,
+        )
+        pcm = _generate_sine_pcm(
+            freq_hz=args.freq,
+            duration_s=args.duration,
+            sample_rate=32000,
+            amplitude=args.amplitude,
+        )
+    print(f"  {len(pcm)} PCM bytes = {len(pcm)//2} samples "
+          f"({len(pcm)//2/32000:.2f}s @ 32 kHz)", flush=True)
+
+    print("Encoding PCM → SBC via ffmpeg...", flush=True)
+    try:
+        sbc_stream = encode_pcm_to_sbc(pcm)
+    except SbcUnavailable as exc:
+        print(f"SBC encoder unavailable: {exc}", file=sys.stderr)
+        return 3
+    except RuntimeError as exc:
+        print(f"SBC encode failed: {exc}", file=sys.stderr)
+        return 4
+    print(f"  {len(sbc_stream)} SBC bytes", flush=True)
+
+    # Split the flat SBC stream into fixed-size frames (44 B for this codec).
+    FRAME_LEN = 44
+    frames = [
+        sbc_stream[i : i + FRAME_LEN]
+        for i in range(0, len(sbc_stream), FRAME_LEN)
+        if i + FRAME_LEN <= len(sbc_stream)
+    ]
+    if not frames:
+        print("ffmpeg produced no complete SBC frames; aborting.", file=sys.stderr)
+        return 5
+
+    # Sanity check the first frame's header to confirm the codec config
+    # matches what the radio expects.
+    from .audio.framing import decode_sbc_header
+    first_hdr = decode_sbc_header(frames[0])
+    if not first_hdr:
+        print(f"First SBC frame has no valid sync byte: {frames[0][:4].hex()}",
+              file=sys.stderr)
+        return 6
+    print(
+        f"  codec: {first_hdr['sampling_frequency_hz']}Hz "
+        f"{first_hdr['blocks']}bl {first_hdr['channel_mode']} "
+        f"{first_hdr['allocation_method']} {first_hdr['subbands']}sb "
+        f"bp{first_hdr['bitpool']}",
+        flush=True,
+    )
+    if (first_hdr["sampling_frequency_hz"] != 32000
+            or first_hdr["channel_mode"] != "mono"
+            or first_hdr["subbands"] != 8
+            or first_hdr["blocks"] != 16):
+        print(
+            "⚠  Encoder produced a different codec config than the radio "
+            "expects. The radio may reject this stream.",
+            flush=True,
+        )
+
+    # Build the HDLC-framed audio packets. The end-of-TX frame is handled
+    # separately by transmit_rfcomm's tail-packet path (sent after a drain,
+    # and repeated for robustness).
+    packets = [build_audio_packet(f) for f in frames]
+    total_bytes = sum(len(p) for p in packets) + len(END_OF_TX_PACKET)
+    print(
+        f"  {len(frames)} SBC frames → {len(packets)} packets "
+        f"(+1 end frame, {total_bytes} wire bytes)",
+        flush=True,
+    )
+
+    # Optional: collect any echo / response from the radio during the TX.
+    rx_log: list[tuple[float, bytes]] = []
+
+    def on_data(t_rel: float, chunk: bytes) -> None:
+        rx_log.append((t_rel, chunk))
+
+    print(
+        f"Transmitting to {args.address} ch {args.channel} "
+        f"at {args.pace*1000:.1f} ms/frame pacing...",
+        flush=True,
+    )
+    r = rf.transmit_rfcomm(
+        args.address,
+        args.channel,
+        packets,
+        pace_interval_s=args.pace,
+        open_timeout=args.open_timeout,
+        on_data=on_data,
+        tail_packet=END_OF_TX_PACKET,
+        tail_repeats=3,
+        tail_interval_s=0.05,
+        post_drain_s=1.5,
+    )
+    print(
+        f"Done. opened={r.opened} phase={r.phase} IOReturn={r.open_status}",
+        flush=True,
+    )
+    if rx_log:
+        print(f"Radio responded with {len(rx_log)} chunks during TX:")
+        for t_rel, chunk in rx_log[:10]:
+            print(f"  [{t_rel:7.3f}s] {len(chunk):3d}B {chunk[:32].hex()}")
+        if len(rx_log) > 10:
+            print(f"  ...{len(rx_log) - 10} more")
+    return 0 if r.opened else 2
+
+
 def _cmd_rfcomm_play(args: argparse.Namespace) -> int:
     """Phase 3d: open RFCOMM, deframe, decode SBC via ffmpeg, play PCM."""
     import threading
@@ -704,6 +894,41 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--channel", type=int, default=2)
     rp.add_argument("--open-timeout", type=float, default=10.0)
     rp.set_defaults(func=_cmd_rfcomm_play)
+
+    rt = sub.add_parser(
+        "rfcomm-tx-tone",
+        help="Phase 3e-1: transmit a test-tone sine wave (no mic needed)",
+    )
+    rt.add_argument("address", help="BT Classic MAC")
+    rt.add_argument("--channel", type=int, default=2)
+    rt.add_argument(
+        "--preset",
+        choices=["ce3k", "ce3k-high"],
+        default=None,
+        help="Play a preset instead of a single sine tone. "
+             "'ce3k' = Close Encounters 5-note motif at original pitch. "
+             "'ce3k-high' = same motif shifted up one octave so every note "
+             "clears the narrowband FM high-pass filter.",
+    )
+    rt.add_argument("--freq", type=float, default=1000.0,
+                    help="Sine tone frequency, Hz (default 1000, ignored if "
+                         "--preset is set)")
+    rt.add_argument("--duration", type=float, default=1.0,
+                    help="Tone duration, seconds (default 1.0, ignored if "
+                         "--preset is set)")
+    rt.add_argument("--amplitude", type=float, default=0.2,
+                    help="Amplitude 0-1 (default 0.2 — loud enough to hear, "
+                         "quiet enough not to clip)")
+    rt.add_argument(
+        "--pace", type=float, default=0.0,
+        help="Seconds to sleep between frame writes. Default 0 — writeSync's "
+             "own flow control handles pacing, and any artificial sleep here "
+             "compounds with writeSync's latency to starve the radio's audio "
+             "buffer. Set to a small positive number only if you specifically "
+             "want to rate-limit TX for debugging.",
+    )
+    rt.add_argument("--open-timeout", type=float, default=10.0)
+    rt.set_defaults(func=_cmd_rfcomm_tx_tone)
 
     rs = sub.add_parser(
         "rfcomm-sbc-dump",

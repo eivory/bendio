@@ -22,6 +22,39 @@ ESCAPE = 0x7D
 XOR = 0x20
 SBC_SYNC = 0x9C
 
+# TX command-byte convention used by the radio's RFCOMM audio protocol.
+# Mirrors the Dart implementation in
+# ../../../htcommander_flutter/lib/radio/radio_audio_manager.dart.
+CMD_AUDIO_DATA = 0x00
+CMD_END = 0x01
+CMD_LOOPBACK = 0x02
+
+# End-of-transmission packet. The radio sends this to us at the end of every
+# RX burst (we observed it as the short "01 00 01 00 00 00 00 00 00"
+# non-SBC packet in Phase 2); we must send it back after our own TX or the
+# radio will stay in transmit mode waiting for more audio.
+END_OF_TX_PACKET = bytes([
+    FLAG, CMD_END, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, FLAG,
+])
+
+
+def build_audio_packet(sbc_frame: bytes) -> bytes:
+    """Wrap an SBC frame in the radio's TX audio packet envelope.
+
+    Output layout: ``0x7E 0x00 <escaped SBC bytes> 0x7E``.
+    """
+    out = bytearray()
+    out.append(FLAG)
+    out.append(CMD_AUDIO_DATA)
+    for b in sbc_frame:
+        if b == FLAG or b == ESCAPE:
+            out.append(ESCAPE)
+            out.append(b ^ XOR)
+        else:
+            out.append(b)
+    out.append(FLAG)
+    return bytes(out)
+
 
 class Deframer:
     """Streaming HDLC-style deframer.

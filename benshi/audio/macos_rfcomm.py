@@ -473,6 +473,172 @@ def inspect_services(address: str, timeout: float = 10.0) -> list[InspectedServi
     return out
 
 
+def transmit_rfcomm(
+    address: str,
+    channel: int,
+    packets: "list[bytes]",
+    *,
+    pace_interval_s: float = 0.004,
+    open_timeout: float = 10.0,
+    on_data: "Optional[callable[[float, bytes], None]]" = None,
+    tail_packet: "Optional[bytes]" = None,
+    tail_repeats: int = 3,
+    tail_interval_s: float = 0.05,
+    post_drain_s: float = 1.5,
+) -> OpenAttemptResult:
+    """Open an RFCOMM channel, write ``packets`` in order (one per call to
+    ``writeSync:length:``), then close.
+
+    Between writes we pump the runloop for ``pace_interval_s`` seconds, which
+    serves two purposes: it gives the IOBluetooth plumbing time to deliver
+    each write to the peer, and it naturally paces output so a 4 ms interval
+    produces real-time audio (one SBC frame = 4 ms of audio at this codec).
+
+    Optional ``on_data`` callback fires for any bytes the radio sends us
+    during the transmission. Most of the time we won't need it, but it lets
+    us snoop for e.g. an echo of our own end-of-TX frame as acknowledgement.
+    """
+    _require_iobluetooth()
+    import objc  # type: ignore
+    from Foundation import NSObject  # type: ignore
+
+    t_open: list[float] = []
+
+    class _Delegate(NSObject):
+        def init(self):  # type: ignore[override]
+            self = objc.super(_Delegate, self).init()
+            if self is None:
+                return None
+            self.open_status = None
+            self.was_opened = False
+            self.is_open = False
+            self.closed = False
+            return self
+
+        def rfcommChannelOpenComplete_status_(self, ch, status):  # noqa: N802
+            self.open_status = int(status)
+            if status == 0:
+                self.was_opened = True
+                self.is_open = True
+                t_open.append(time.monotonic())
+
+        def rfcommChannelClosed_(self, ch):  # noqa: N802
+            self.is_open = False
+            self.closed = True
+
+        def rfcommChannelData_data_length_(self, ch, data, length):  # noqa: N802
+            if on_data is None or length <= 0 or data is None:
+                return
+            try:
+                chunk = bytes(data[:length])
+            except Exception:
+                try:
+                    chunk = bytes(data)[:length]
+                except Exception:
+                    return
+            t_rel = time.monotonic() - (t_open[0] if t_open else time.monotonic())
+            try:
+                on_data(t_rel, chunk)
+            except Exception:
+                log.exception("on_data callback raised")
+
+    dev = _device_by_address(address)
+    delegate = _Delegate.alloc().init()
+    try:
+        status, ch = dev.openRFCOMMChannelAsync_withChannelID_delegate_(
+            None, channel, delegate
+        )
+    except Exception as exc:
+        return OpenAttemptResult(
+            address=address, channel=channel, opened=False,
+            open_status=None, phase=f"open_call_exception:{exc!r}",
+        )
+    if status != 0:
+        return OpenAttemptResult(
+            address=address, channel=channel, opened=False,
+            open_status=int(status), phase="open_call",
+        )
+
+    # Wait for open-complete delegate callback.
+    deadline = time.monotonic() + open_timeout
+    while time.monotonic() < deadline:
+        _pump_runloop(0.1)
+        if delegate.open_status is not None:
+            break
+    if not delegate.was_opened:
+        try:
+            if ch is not None:
+                ch.closeChannel()
+        except Exception:
+            pass
+        return OpenAttemptResult(
+            address=address, channel=channel, opened=False,
+            open_status=delegate.open_status, phase="timeout",
+        )
+
+    # Stream the packets. writeSync: returns IOReturn (0 = success).
+    write_errors = 0
+
+    def _write(p: bytes) -> None:
+        nonlocal write_errors
+        try:
+            status = ch.writeSync_length_(p, len(p))
+        except Exception:
+            log.exception("writeSync_length_ raised")
+            write_errors += 1
+            return
+        if status != 0:
+            write_errors += 1
+            log.warning("writeSync returned IOReturn=%d", status)
+
+    try:
+        for pkt in packets:
+            _write(pkt)
+            _pump_runloop(pace_interval_s)
+
+        # After the last audio packet, give the radio time to drain its
+        # internal audio buffer before sending the end-of-TX signal. If we
+        # send the end frame while there are still queued audio bytes on
+        # the radio's side, the radio finishes playing the audio first and
+        # then interprets the end frame — but with our pacing matching the
+        # audio rate, the drain is minimal. Bigger issue is the close-race
+        # (below).
+        if tail_packet is not None:
+            # Send the end-of-TX frame, then wait, then repeat a few times
+            # for robustness. Each write is cheap; the radio will simply
+            # re-receive the same end frame. Repeating guards against the
+            # first one being dropped if the channel is already tearing
+            # down Bluetooth-side.
+            for i in range(max(1, tail_repeats)):
+                _write(tail_packet)
+                _pump_runloop(tail_interval_s)
+
+        # Hold the channel open long enough that any in-flight writes
+        # (especially the tail frame) reach the radio before closeChannel
+        # tears everything down. Without this, closing right after the
+        # last write seems to drop the end frame and the radio stays
+        # wedged in TX.
+        _pump_runloop(post_drain_s)
+    finally:
+        try:
+            if ch is not None and not delegate.closed:
+                ch.closeChannel()
+        except Exception:
+            log.exception("closeChannel raised")
+        for _ in range(20):
+            if delegate.closed:
+                break
+            _pump_runloop(0.05)
+
+    phase = "closed" if delegate.closed else "open_complete"
+    if write_errors:
+        phase += f" ({write_errors} write errors)"
+    return OpenAttemptResult(
+        address=address, channel=channel, opened=delegate.was_opened,
+        open_status=delegate.open_status, phase=phase,
+    )
+
+
 def try_open_rfcomm(
     address: str, channel: int, *, open_timeout: float = 5.0
 ) -> OpenAttemptResult:

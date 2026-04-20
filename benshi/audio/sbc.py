@@ -157,3 +157,55 @@ class SbcStream:
 # anywhere now that we pivoted to ffmpeg, but kept so external code that
 # imports ``Sbc`` doesn't break outright.
 Sbc = SbcStream
+
+
+def encode_pcm_to_sbc(
+    pcm_bytes: bytes,
+    *,
+    sample_rate: int = 32000,
+    channels: int = 1,
+    bitrate: str = "88k",
+) -> bytes:
+    """One-shot synchronous PCM → SBC encode via ffmpeg.
+
+    Input must be signed 16-bit little-endian interleaved PCM at
+    ``sample_rate`` Hz with ``channels`` channels.
+
+    Default parameters target the radio's codec config exactly:
+    32 kHz mono at ~88 kbps ≈ bitpool 18, which combined with ffmpeg's
+    SBC encoder defaults (16 blocks, 8 subbands, loudness allocation)
+    produces the ``9C 71 12`` header the radio expects.
+
+    Returns the raw back-to-back SBC frame stream. Caller is responsible
+    for splitting into fixed-size frames and wrapping in the HDLC envelope.
+    """
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise SbcUnavailable(
+            "ffmpeg not found on PATH. Install with: brew install ffmpeg"
+        )
+    result = subprocess.run(
+        [
+            ffmpeg_path,
+            "-loglevel", "error",
+            "-hide_banner",
+            "-nostdin",
+            "-f", "s16le",
+            "-ar", str(sample_rate),
+            "-ac", str(channels),
+            "-i", "pipe:0",
+            "-c:a", "sbc",
+            "-b:a", bitrate,
+            "-f", "sbc",
+            "pipe:1",
+        ],
+        input=pcm_bytes,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        err = result.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(
+            f"ffmpeg SBC encode failed (exit {result.returncode}): {err}"
+        )
+    return result.stdout
