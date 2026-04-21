@@ -3,7 +3,8 @@
 A macOS Python library for two-way audio with BTech UV-Pro and other
 Benshi-family handheld radios (GA-5WB, VR-N76, VR-N7500, GMRS-Pro).
 
-**Status:** Phase 1 — BLE control link. Audio (Phase 3) is not implemented yet.
+**Status:** full-duplex audio working. BLE control, RX (radio → Mac speaker)
+and TX (Mac mic → radio) all proven end-to-end against a UV-Pro.
 
 ## Hardware / OS requirements
 
@@ -130,15 +131,48 @@ benshi_mac/
 └── README.md
 ```
 
+## Known caveats
+
+### IOBluetooth is deprecated
+
+The Classic Bluetooth RFCOMM path this library uses for audio depends on
+Apple's `IOBluetooth` framework. Apple deprecated `IOBluetooth` in favour
+of `CoreBluetooth`, but `CoreBluetooth` is BLE-only and provides no
+replacement for RFCOMM / SPP. There is no supported alternative today.
+
+`IOBluetooth` still works on every shipping macOS release (including
+macOS 15 Sequoia and later), but Apple has signalled it won't receive new
+development. If Apple eventually removes it, the audio path here will
+need to be re-implemented — likely via a `DriverKit`-based RFCOMM shim,
+or by giving up on Classic Bluetooth for these radios and pushing the
+vendor to ship a BLE audio characteristic.
+
+Today: fine. Long-term: a ticking risk on the Classic BT half of the
+library. BLE control (`benshi/link.py`) is unaffected.
+
 ## Roadmap
 
-- **Phase 1 (done-ish):** BLE control — device info, channel dump, settings,
-  notifications. Validate against `benshi_ble_confirmed.md`.
-- **Phase 2 (next):** Put the radio in FM RX, run `benshi sniff`, commit the
-  trace to `docs/ble_fm_rx_trace.md`. Confirms audio is not on BLE.
-- **Phase 3:** RFCOMM SPP audio via PyObjC + `IOBluetoothRFCOMMChannel`.
-  SBC codec, 0x7E framing, sounddevice for I/O.
-- **Phase 4:** Ergonomic public API, examples, packaging.
+- **Phase 1 (done):** BLE control — device info, channel dump, settings,
+  notifications. Validated against `benshi_ble_confirmed.md`.
+- **Phase 2 (done):** Put the radio in FM RX, ran `benshi sniff` and
+  `benshi sniff-all`, committed the trace to `docs/ble_fm_rx_trace.md`.
+  Confirmed audio is not on BLE on any service, including an undocumented
+  vendor service this library is the first to inspect.
+- **Phase 3 (done):** RFCOMM SPP audio via PyObjC + `IOBluetoothRFCOMMChannel`.
+  SBC codec (ffmpeg subprocess — homebrew dropped the standalone `sbc`
+  formula, so `libsbc` via ctypes wasn't feasible), 0x7E framing,
+  sounddevice for I/O. Breakdown:
+    - 3a: open/close RFCOMM cleanly
+    - 3b: dump raw bytes; confirm SBC framing on channel 2 ("BS AOC")
+    - 3c: HDLC deframer + SBC frame splitter
+    - 3d: live RX audio to default output (~200 ms latency)
+    - 3e: TX test tone → live mic TX, full duplex
+- **Phase 4 (partial):** Ergonomic API + examples + packaging.
+  Low-level building blocks (`Radio`, `RfcommTxSession`, `SbcStream`,
+  `SbcEncodeStream`, `Deframer`, `build_audio_packet`) are stable and
+  composable; `examples/` covers device info, sniff, listen, and PTT.
+  TODO: a top-level `BenshiRadio` facade that unifies BLE control +
+  audio behind one async context manager.
 
 ## References
 
