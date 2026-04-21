@@ -26,6 +26,13 @@ from .radio import Radio
 log = logging.getLogger(__name__)
 
 
+def _cmd_server(args: argparse.Namespace) -> int:
+    """JSON-RPC server over stdin/stdout. See benshi.server docstring for
+    the protocol. Exits on stdin EOF or after a ``shutdown`` call."""
+    from .server import main as _server_main
+    return _server_main()
+
+
 def _cmd_audio_devices(args: argparse.Namespace) -> int:
     """List input/output devices visible to sounddevice, marking defaults."""
     try:
@@ -1110,6 +1117,13 @@ def main(argv: list[str] | None = None) -> int:
         help="List input and output devices visible to sounddevice",
     )
     ad.set_defaults(func=_cmd_audio_devices)
+
+    sv = sub.add_parser(
+        "server",
+        help="Run as a JSON-RPC server on stdin/stdout for subprocess "
+        "integration (e.g. HTCommander-X on macOS).",
+    )
+    sv.set_defaults(func=_cmd_server)
 
     rm = sub.add_parser(
         "rfcomm-tx-mic",
