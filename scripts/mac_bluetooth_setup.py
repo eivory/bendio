@@ -20,6 +20,7 @@ Idempotent. Safe to re-run. Does not touch the system Python install.
 """
 from __future__ import annotations
 
+import os
 import plistlib
 import shutil
 import sys
@@ -47,9 +48,26 @@ def find_source_app(executable: Path) -> Path:
     raise RuntimeError(f"Could not locate Python.app for {executable}")
 
 
-def venv_root(executable: Path) -> Path:
-    # .venv/bin/python → .venv
-    return executable.parent.parent
+def venv_root() -> Path | None:
+    """Return the active venv root, or None if we're not in a venv.
+
+    Tries three detectors in order of reliability:
+      1. ``sys.prefix != sys.base_prefix`` — the canonical "am I in a venv"
+         check, works regardless of symlink resolution.
+      2. ``VIRTUAL_ENV`` env var — set by the venv's activate script.
+      3. Walking up from ``sys.executable`` as a last resort.
+    """
+    if sys.prefix != sys.base_prefix:
+        return Path(sys.prefix)
+    venv_env = os.environ.get("VIRTUAL_ENV")
+    if venv_env:
+        return Path(venv_env)
+    # Last resort: assume sys.executable is .venv/bin/python. This can
+    # fail if a Homebrew-style install reports a resolved path instead.
+    candidate = Path(sys.executable).parent.parent
+    if (candidate / "pyvenv.cfg").exists():
+        return candidate
+    return None
 
 
 BUNDLE_ID = "org.bendio.python-bt"
@@ -84,11 +102,14 @@ def main() -> int:
         return 0
 
     exe = Path(sys.executable)
-    venv = venv_root(exe)
-    if not (venv / "pyvenv.cfg").exists():
+    venv = venv_root()
+    if venv is None or not (venv / "pyvenv.cfg").exists():
         print(
-            "Run this from inside an activated venv (expected "
-            f"{venv}/pyvenv.cfg to exist)."
+            "Run this from inside an activated venv. We couldn't locate a\n"
+            "venv root. Tried sys.prefix, $VIRTUAL_ENV, and walking up from\n"
+            f"sys.executable ({exe}). If the venv is activated, try invoking\n"
+            "this script via the venv's own python directly:\n"
+            "  .venv/bin/python scripts/mac_bluetooth_setup.py"
         )
         return 2
 
