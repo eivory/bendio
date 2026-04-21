@@ -10,23 +10,77 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Edward Ivory" }]
+keywords = [
+    "bluetooth",
+    "ble",
+    "rfcomm",
+    "ham-radio",
+    "amateur-radio",
+    "uv-pro",
+    "btech",
+    "benshi",
+    "macos",
+    "sbc",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: System :: Hardware",
+]
 dependencies = [
     "bleak>=0.22.0",
     "typing_extensions>=4.1.0",
     "pyobjc-framework-IOBluetooth>=10.0; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "sounddevice>=0.4.6",
 ]
 
 [project.optional-dependencies]
-audio = [
-    "sounddevice>=0.4.6",
-]
 dev = [
     "pytest>=7",
+    "ruff>=0.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/eivory/benshi"
+Source = "https://github.com/eivory/benshi"
+Issues = "https://github.com/eivory/benshi/issues"
+Changelog = "https://github.com/eivory/benshi/blob/main/CHANGELOG.md"
 
 [project.scripts]
 benshi = "benshi.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["benshi*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+# The vendored benlink protocol module lives here; don't lint third-party code.
+exclude = ["benshi/protocol"]
+
+[tool.ruff.lint]
+# Start small — E (pycodestyle errors) + F (pyflakes) + I (imports).
+# Add more over time as the codebase stabilizes.
+select = ["E", "F", "I"]
+ignore = [
+    # Ambiguous variable/class names — callback-style code uses `l` a lot.
+    "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use module-level imports freely and don't need strict style.
+"tests/*" = ["E402"]

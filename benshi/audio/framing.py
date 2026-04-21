@@ -14,9 +14,6 @@ sync byte rather than hardcoding the length.
 """
 from __future__ import annotations
 
-from typing import Iterable
-
-
 FLAG = 0x7E
 ESCAPE = 0x7D
 XOR = 0x20

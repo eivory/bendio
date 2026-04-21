@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Offline unit tests. Can run anywhere — no Bluetooth or mic hardware
+  # needed. We run on macOS because that's the target OS; ubuntu-latest
+  # would work too for the pure-Python paths but would skip the SBC
+  # round-trip tests on hosts without ffmpeg.
+  test:
+    name: test (py${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ffmpeg (for SBC round-trip tests)
+        run: brew install ffmpeg
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Run pytest
+        run: pytest -v
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Check (ruff)
+        run: |
+          # benshi/protocol/ is vendored verbatim from benlink; don't lint it.
+          ruff check --exclude benshi/protocol .

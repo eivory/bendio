@@ -18,6 +18,11 @@ import sys
 import time
 import typing as t
 
+from . import protocol as p
+from .link import RADIO_SERVICE_UUID
+from .link import scan as ble_scan
+from .radio import Radio
+
 log = logging.getLogger(__name__)
 
 
@@ -75,10 +80,6 @@ def _parse_sd_device(s):
         return int(s)
     except ValueError:
         return s
-
-from . import protocol as p
-from .link import scan as ble_scan, RADIO_SERVICE_UUID
-from .radio import Radio
 
 
 async def _cmd_scan(args: argparse.Namespace) -> int:
@@ -322,10 +323,9 @@ def _cmd_rfcomm_tx_mic(args: argparse.Namespace) -> int:
     IOBluetooth delegate callbacks and watches for stop.
     """
     import threading
-    import queue
 
     from .audio import macos_rfcomm as rf
-    from .audio.framing import build_audio_packet, END_OF_TX_PACKET
+    from .audio.framing import END_OF_TX_PACKET, build_audio_packet
     from .audio.sbc import SbcEncodeStream, SbcUnavailable
     try:
         import sounddevice as sd  # type: ignore
@@ -395,9 +395,13 @@ def _cmd_rfcomm_tx_mic(args: argparse.Namespace) -> int:
         device=_parse_sd_device(args.device),
     )
 
+    mode_s = (
+        f"Recording for {args.duration} s."
+        if args.duration
+        else "Press Ctrl-C to stop."
+    )
     print(
-        f"Starting mic ({input_stream.samplerate:.0f} Hz mono). "
-        f"{'Recording for ' + str(args.duration) + ' s.' if args.duration else 'Press Ctrl-C to stop.'}",
+        f"Starting mic ({input_stream.samplerate:.0f} Hz mono). {mode_s}",
         flush=True,
     )
     input_stream.start()
@@ -451,8 +455,8 @@ def _cmd_rfcomm_tx_mic(args: argparse.Namespace) -> int:
 def _cmd_rfcomm_tx_tone(args: argparse.Namespace) -> int:
     """Phase 3e-1: batch-TX a sine-wave test tone and prove the full TX path."""
     from .audio import macos_rfcomm as rf
-    from .audio.framing import build_audio_packet, END_OF_TX_PACKET
-    from .audio.sbc import encode_pcm_to_sbc, SbcUnavailable
+    from .audio.framing import END_OF_TX_PACKET, build_audio_packet
+    from .audio.sbc import SbcUnavailable, encode_pcm_to_sbc
 
     if args.preset in ("ce3k", "ce3k-high"):
         octave = 1 if args.preset == "ce3k-high" else 0
@@ -582,6 +586,7 @@ def _cmd_rfcomm_tx_tone(args: argparse.Namespace) -> int:
 def _cmd_rfcomm_play(args: argparse.Namespace) -> int:
     """Phase 3d: open RFCOMM, deframe, decode SBC via ffmpeg, play PCM."""
     import threading
+
     from .audio import macos_rfcomm as rf
     from .audio.framing import Deframer, split_sbc_frames
     from .audio.sbc import SbcStream, SbcUnavailable
@@ -630,7 +635,8 @@ def _cmd_rfcomm_play(args: argparse.Namespace) -> int:
         decoder = SbcStream(on_pcm=on_pcm)
     except SbcUnavailable as exc:
         print(f"SBC decoder unavailable: {exc}", file=sys.stderr)
-        pcm_stream.stop(); pcm_stream.close()
+        pcm_stream.stop()
+        pcm_stream.close()
         signal.signal(signal.SIGINT, prev)
         return 3
 
@@ -690,8 +696,9 @@ def _cmd_rfcomm_play(args: argparse.Namespace) -> int:
 def _cmd_rfcomm_sbc_dump(args: argparse.Namespace) -> int:
     """Phase 3c: open RFCOMM, deframe 7E/7D, split SBC frames, print per-frame."""
     import threading
+
     from .audio import macos_rfcomm as rf
-    from .audio.framing import Deframer, split_sbc_frames, decode_sbc_header
+    from .audio.framing import Deframer, decode_sbc_header, split_sbc_frames
 
     stop_flag = threading.Event()
 
@@ -771,6 +778,7 @@ def _cmd_rfcomm_sbc_dump(args: argparse.Namespace) -> int:
 def _cmd_rfcomm_dump(args: argparse.Namespace) -> int:
     """Phase 3b: open RFCOMM channel and stream raw inbound bytes until Ctrl-C."""
     import threading
+
     from .audio import macos_rfcomm as rf
 
     stop_flag = threading.Event()
@@ -878,6 +886,7 @@ async def _cmd_sniff_all(args: argparse.Namespace) -> int:
     carries data during FM RX.
     """
     from bleak import BleakClient
+
     from .link import RADIO_WRITE_UUID
 
     t0 = time.monotonic()

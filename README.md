@@ -115,19 +115,25 @@ asyncio.run(main())
 ## Project layout
 
 ```
-benshi_mac/
+benshi/
 ├── benshi/
-│   ├── protocol/       # vendored from benlink (Apache-2.0) — see NOTICE.md
+│   ├── protocol/       # vendored from benlink (Apache-2.0) — see NOTICE
 │   ├── link.py         # BLE transport via bleak + CoreBluetooth
 │   ├── radio.py        # high-level async API, command/reply matching
-│   ├── cli.py          # scan/connect/channels/sniff subcommands
-│   └── audio/          # Phase 3 — RFCOMM SPP via PyObjC + IOBluetooth
-├── examples/
+│   ├── cli.py          # scan/connect/channels/sniff/rfcomm-* subcommands
+│   └── audio/          # RFCOMM SPP + SBC + HDLC framing
+├── examples/           # 01_device_info, 02_sniff_fm_rx, 03_listen, 04_ptt
+├── tests/              # offline pytest suite (no hardware needed)
 ├── docs/
-│   └── ble_fm_rx_trace.md   # Phase 2 deliverable
+│   ├── PROTOCOL_NOTES.md    # empirical findings + spec corrections
+│   └── ble_fm_rx_trace.md   # Phase 2 capture + analysis
+├── scripts/            # mac_bluetooth_setup.py, mic_check.py
+├── .github/workflows/  # CI
 ├── pyproject.toml
-├── LICENSE.benlink
-├── NOTICE.md
+├── LICENSE             # Apache-2.0
+├── LICENSE.benlink     # vendored subtree's license (also Apache-2.0)
+├── NOTICE              # required attributions
+├── CHANGELOG.md
 └── README.md
 ```
 
@@ -153,7 +159,7 @@ library. BLE control (`benshi/link.py`) is unaffected.
 ## Roadmap
 
 - **Phase 1 (done):** BLE control — device info, channel dump, settings,
-  notifications. Validated against `benshi_ble_confirmed.md`.
+  notifications. Cross-checked against the HTCommander protocol doc.
 - **Phase 2 (done):** Put the radio in FM RX, ran `benshi sniff` and
   `benshi sniff-all`, committed the trace to `docs/ble_fm_rx_trace.md`.
   Confirmed audio is not on BLE on any service, including an undocumented
@@ -200,17 +206,26 @@ library. BLE control (`benshi/link.py`) is unaffected.
 
 ## References
 
-- [`../benshi_ble_confirmed.md`](../benshi_ble_confirmed.md) — authoritative
-  protocol doc. The plan and this library follow its §2–§7 verbatim.
 - [benlink](https://github.com/khusmann/benlink) — Python reference whose
-  `protocol/` subtree we vendor.
-- [HTCommander](https://github.com/Ylianst/HTCommander) — C# reference,
-  particularly `src/radio/MacBluetoothBle.cs` for CoreBluetooth patterns.
-- [`../htcommander_flutter/lib/radio/`](../htcommander_flutter/lib/radio/) —
-  sibling Dart/Flutter implementation (Linux/Windows) used for cross-validation.
+  `protocol/` subtree is vendored into `benshi/protocol/` (Apache-2.0).
+  Our BLE control pattern tracks `BleCommandLink` closely.
+- [HTCommander](https://github.com/Ylianst/HTCommander) — C# reference
+  implementation by Ylian Saint-Hilaire. Source of the HDLC audio framing
+  bytes, SBC codec parameters, and end-of-TX packet format used here.
+- [HTCommander-X](https://github.com/dikei100/HTCommander-X) — Flutter
+  fork of the above (by dikei100) with the Linux/Windows RFCOMM audio
+  implementations we studied for the SDP discovery + channel probing
+  pattern. The "BS AOC" service-name detection that identifies the audio
+  channel on this radio family came from its `linux_audio_transport.dart`.
+
+Empirical protocol findings (including corrections to the above
+references) are collected in [`docs/PROTOCOL_NOTES.md`](docs/PROTOCOL_NOTES.md).
 
 ## Licensing
 
-The vendored `benshi/protocol/` subtree is Apache-2.0 (see `LICENSE.benlink`
-and `NOTICE.md`). New code in this repo is under the parent project's
-license unless/until we add a top-level `LICENSE` here.
+This project is licensed under the **Apache License 2.0**. See the `LICENSE`
+file for the full text and the `NOTICE` file for attributions.
+
+The `benshi/protocol/` subtree is vendored from benlink (also Apache-2.0).
+A copy of the upstream license is retained as `LICENSE.benlink` for
+provenance.

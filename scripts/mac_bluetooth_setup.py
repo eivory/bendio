@@ -20,7 +20,6 @@ Idempotent. Safe to re-run. Does not touch the system Python install.
 """
 from __future__ import annotations
 
-import os
 import plistlib
 import shutil
 import sys
@@ -115,7 +114,8 @@ def main() -> int:
         print(f"Patched binary missing at {patched_python}; aborting.")
         return 3
 
-    for link_name in ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}"):
+    py_short = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for link_name in ("python", "python3", py_short):
         link_path = venv / "bin" / link_name
         if link_path.is_symlink() or link_path.exists():
             link_path.unlink()

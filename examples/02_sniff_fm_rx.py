@@ -16,7 +16,6 @@ import time
 from benshi import Radio
 from benshi import protocol as p
 
-
 ALL_EVENTS = [
     p.EventType.HT_STATUS_CHANGED,
     p.EventType.HT_CH_CHANGED,

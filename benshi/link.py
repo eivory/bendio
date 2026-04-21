@@ -7,7 +7,6 @@ System Settings first.
 """
 from __future__ import annotations
 
-import asyncio
 import typing as t
 
 from bleak import BleakClient, BleakScanner
