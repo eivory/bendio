@@ -45,5 +45,5 @@ jobs:
         run: pip install ruff
       - name: Check (ruff)
         run: |
-          # benshi/protocol/ is vendored verbatim from benlink; don't lint it.
-          ruff check --exclude benshi/protocol .
+          # bendio/protocol/ is vendored verbatim from benlink; don't lint it.
+          ruff check --exclude bendio/protocol .

@@ -12,7 +12,7 @@ This script makes a private copy of the interpreter's ``Python.app`` inside
 the venv, patches its ``Info.plist``, and re-links ``.venv/bin/python`` at
 the patched copy. From then on macOS prompts once and remembers the grant.
 
-Run after ``pip install -e .`` and before the first ``benshi`` invocation:
+Run after ``pip install -e .`` and before the first ``bendio`` invocation:
 
     python scripts/mac_bluetooth_setup.py
 
@@ -26,10 +26,10 @@ import sys
 from pathlib import Path
 
 BT_USAGE = (
-    "benshi uses Bluetooth Low Energy to control a paired ham radio."
+    "bendio uses Bluetooth Low Energy to control a paired ham radio."
 )
 MIC_USAGE = (
-    "benshi captures microphone audio to transmit over the ham radio."
+    "bendio captures microphone audio to transmit over the ham radio."
 )
 
 
@@ -52,7 +52,7 @@ def venv_root(executable: Path) -> Path:
     return executable.parent.parent
 
 
-BUNDLE_ID = "org.benshi.python-bt"
+BUNDLE_ID = "org.bendio.python-bt"
 
 
 def patch_plist(plist_path: Path) -> bool:
@@ -71,8 +71,8 @@ def patch_plist(plist_path: Path) -> bool:
     # Unique bundle ID so macOS treats this as a distinct app for TCC purposes
     # and prompts fresh instead of inheriting org.python.python's state.
     data["CFBundleIdentifier"] = BUNDLE_ID
-    data["CFBundleName"] = "benshi"
-    data["CFBundleDisplayName"] = "benshi (Python for Bluetooth + mic)"
+    data["CFBundleName"] = "bendio"
+    data["CFBundleDisplayName"] = "bendio (Python for Bluetooth + mic)"
     with plist_path.open("wb") as f:
         plistlib.dump(data, f)
     return True

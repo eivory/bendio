@@ -16,7 +16,7 @@ RFCOMM-transport concern.
 `benlink`'s `BleCommandLink` got this right from the start; we follow it.
 Tested end-to-end against UV-PRO firmware 0x92 (146). If a different
 Benshi-family radio ever turns out to require the `FF 01` wrapper on
-BLE, `benshi.radio.Radio._wrap` would need to branch on device.
+BLE, `bendio.radio.Radio._wrap` would need to branch on device.
 
 ## REGISTER_NOTIFICATION does get a reply
 
@@ -32,7 +32,7 @@ that produce this error response on UV-PRO; `HT_STATUS_CHANGED`,
 `HT_CH_CHANGED`, `HT_SETTINGS_CHANGED`, `DATA_RXD`, and others are
 accepted and produce no visible reply (silent success).
 
-Our patch in `benshi/protocol/command/message.py` `body_disc()`
+Our patch in `bendio/protocol/command/message.py` `body_disc()`
 returns `bf_bytes(n // 8)` for the reply case instead of raising, so
 the reply parses as raw bytes rather than crashing the decoder. Noted
 inline in the file per Apache-2.0 §4(b).

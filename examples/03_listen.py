@@ -1,6 +1,6 @@
 """Live RX: decode SBC from the radio and play it through the default speaker.
 
-Same building blocks the ``benshi rfcomm-play`` CLI uses, but stripped down
+Same building blocks the ``bendio rfcomm-play`` CLI uses, but stripped down
 to the bare minimum to show the library shape. Call it like::
 
     python examples/03_listen.py 38-d2-00-01-37-0f
@@ -16,9 +16,9 @@ import threading
 
 import sounddevice as sd
 
-from benshi.audio.framing import Deframer, split_sbc_frames
-from benshi.audio.macos_rfcomm import dump_rfcomm
-from benshi.audio.sbc import SbcStream
+from bendio.audio.framing import Deframer, split_sbc_frames
+from bendio.audio.macos_rfcomm import dump_rfcomm
+from bendio.audio.sbc import SbcStream
 
 
 def main(address: str, channel: int = 2) -> int:

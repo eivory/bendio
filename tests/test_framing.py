@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from benshi.audio.framing import (
+from bendio.audio.framing import (
     CMD_AUDIO_DATA,
     CMD_END,
     END_OF_TX_PACKET,

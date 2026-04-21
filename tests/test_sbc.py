@@ -16,8 +16,8 @@ pytestmark = pytest.mark.skipif(
     reason="ffmpeg not installed",
 )
 
-from benshi.audio.framing import decode_sbc_header
-from benshi.audio.sbc import (
+from bendio.audio.framing import decode_sbc_header
+from bendio.audio.sbc import (
     SbcEncodeStream,
     SbcStream,
     SbcUnavailable,
@@ -87,7 +87,7 @@ def test_streaming_decoder_round_trip_through_encoder():
 
 def test_sbc_stream_raises_when_ffmpeg_missing(monkeypatch):
     """If ffmpeg disappears from PATH, we want a clear typed error."""
-    monkeypatch.setattr("benshi.audio.sbc.shutil.which", lambda _: None)
+    monkeypatch.setattr("bendio.audio.sbc.shutil.which", lambda _: None)
     with pytest.raises(SbcUnavailable):
         SbcStream(on_pcm=lambda _: None)
     with pytest.raises(SbcUnavailable):

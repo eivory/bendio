@@ -5,7 +5,7 @@ confirm our wrappers + modifications behave correctly.
 """
 from __future__ import annotations
 
-from benshi import protocol as p
+from bendio import protocol as p
 
 
 def test_get_dev_info_command_round_trip():

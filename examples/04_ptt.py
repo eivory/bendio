@@ -1,6 +1,6 @@
 """Live TX: capture from the default mic, encode to SBC, transmit on the radio.
 
-Same building blocks the ``benshi rfcomm-tx-mic`` CLI uses. Call it like::
+Same building blocks the ``bendio rfcomm-tx-mic`` CLI uses. Call it like::
 
     python examples/04_ptt.py 38-d2-00-01-37-0f
 
@@ -16,9 +16,9 @@ import time
 
 import sounddevice as sd
 
-from benshi.audio.framing import END_OF_TX_PACKET, build_audio_packet
-from benshi.audio.macos_rfcomm import RfcommTxSession
-from benshi.audio.sbc import SbcEncodeStream
+from bendio.audio.framing import END_OF_TX_PACKET, build_audio_packet
+from bendio.audio.macos_rfcomm import RfcommTxSession
+from bendio.audio.sbc import SbcEncodeStream
 
 
 def main(address: str, channel: int = 2, max_seconds: float = 10.0) -> int:

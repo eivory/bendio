@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 # These imports are only importable on macOS with pyobjc-framework-IOBluetooth
-# installed. We guard here so the rest of the benshi package remains importable
+# installed. We guard here so the rest of the bendio package remains importable
 # on non-Darwin hosts.
 try:  # pragma: no cover - import is platform-dependent
     from Foundation import NSDate, NSRunLoop  # type: ignore

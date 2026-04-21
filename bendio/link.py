@@ -53,7 +53,7 @@ async def scan(
 class BleLink:
     """Low-level BLE link. Emits raw frame bytes and accepts raw frame bytes.
 
-    Prefer :class:`benshi.Radio` for normal use; this class is for tests,
+    Prefer :class:`bendio.Radio` for normal use; this class is for tests,
     sniffing, and custom integrations that want the raw GAIA frame stream.
     """
 

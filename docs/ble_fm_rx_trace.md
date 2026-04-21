@@ -3,7 +3,7 @@
 ## Test setup
 
 - BTECH UV-PRO, firmware 0x92 (146), hw 0x01, paired over BLE to macOS 26.4
-- Tool: `benshi sniff` on our scratch BLE stack (this repo)
+- Tool: `bendio sniff` on our scratch BLE stack (this repo)
 - Registered notification classes: `HT_STATUS_CHANGED`, `RADIO_STATUS_CHANGED`,
   `USER_ACTION`, `SYSTEM_EVENT`, `POSITION_CHANGE`
 - Sequence run during capture:
@@ -83,7 +83,7 @@ The `write-without-response` property on `…0002` is a streaming-grade write
 pattern (atypical for passive config/status). That made it a plausible
 candidate for a hidden audio path.
 
-We ran a follow-up capture with `benshi sniff-all`, which subscribes to every
+We ran a follow-up capture with `bendio sniff-all`, which subscribes to every
 notify characteristic on every service (including `…0003` above) and registers
 for `HT_STATUS_CHANGED` so the RX edges are in the same log:
 

@@ -1,9 +1,9 @@
 """High-level async API for a Benshi-family radio over BLE.
 
-The transport is the GATT link in :mod:`benshi.link`. Every BLE write carries
+The transport is the GATT link in :mod:`bendio.link`. Every BLE write carries
 one GAIA frame (``FF 01 flags n_pay <4-byte cmd header> <payload>``); every
-indication is the same. We wrap outgoing :class:`~benshi.protocol.Message`
-objects into :class:`~benshi.protocol.GaiaFrame` and unwrap incoming frames
+indication is the same. We wrap outgoing :class:`~bendio.protocol.Message`
+objects into :class:`~bendio.protocol.GaiaFrame` and unwrap incoming frames
 the same way before parsing as a Message.
 
 Command/reply pairing uses the ``is_reply`` bit convention: the radio replies

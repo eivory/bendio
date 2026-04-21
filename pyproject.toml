@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "benshi"
+name = "bendio"
 version = "0.1.0"
 description = "macOS library for two-way audio with BTech UV-Pro / Benshi-family ham radios"
 readme = "README.md"
@@ -18,7 +18,7 @@ keywords = [
     "amateur-radio",
     "uv-pro",
     "btech",
-    "benshi",
+    "bendio",
     "macos",
     "sbc",
 ]
@@ -52,16 +52,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/eivory/benshi"
-Source = "https://github.com/eivory/benshi"
-Issues = "https://github.com/eivory/benshi/issues"
-Changelog = "https://github.com/eivory/benshi/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/eivory/bendio"
+Source = "https://github.com/eivory/bendio"
+Issues = "https://github.com/eivory/bendio/issues"
+Changelog = "https://github.com/eivory/bendio/blob/main/CHANGELOG.md"
 
 [project.scripts]
-benshi = "benshi.cli:main"
+bendio = "bendio.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["benshi*"]
+include = ["bendio*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -70,7 +70,7 @@ python_files = ["test_*.py"]
 [tool.ruff]
 line-length = 100
 # The vendored benlink protocol module lives here; don't lint third-party code.
-exclude = ["benshi/protocol"]
+exclude = ["bendio/protocol"]
 
 [tool.ruff.lint]
 # Start small — E (pycodestyle errors) + F (pyflakes) + I (imports).

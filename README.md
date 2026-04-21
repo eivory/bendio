@@ -1,4 +1,4 @@
-# benshi
+# bendio
 
 A macOS Python library for two-way audio with BTech UV-Pro and other
 Benshi-family handheld radios (GA-5WB, VR-N76, VR-N7500, GMRS-Pro).
@@ -23,7 +23,7 @@ and TX (Mac mic → radio) all proven end-to-end against a UV-Pro.
 ## Install (editable, for development)
 
 ```bash
-cd benshi_mac
+cd bendio
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -53,7 +53,7 @@ description and assigning a unique `CFBundleIdentifier`), re-signs it
 ad-hoc, re-links `.venv/bin/python` at the patched copy, and clears any
 stale TCC decision for the new bundle ID. Idempotent and local to the venv.
 
-After that, the first `benshi scan` invocation should produce a macOS
+After that, the first `bendio scan` invocation should produce a macOS
 permission prompt. If no prompt appears and the process still crashes,
 your **terminal / IDE** also needs Bluetooth permission:
 
@@ -65,19 +65,19 @@ your **terminal / IDE** also needs Bluetooth permission:
 Scan for nearby radios:
 
 ```bash
-benshi scan
+bendio scan
 ```
 
 Connect, fetch device info, dump first 32 channels, and tail notifications:
 
 ```bash
-benshi connect AA:BB:CC:DD:EE:FF
+bendio connect AA:BB:CC:DD:EE:FF
 ```
 
 Dump the full channel table (tab-separated):
 
 ```bash
-benshi channels AA:BB:CC:DD:EE:FF --count 200
+bendio channels AA:BB:CC:DD:EE:FF --count 200
 ```
 
 Sniff every inbound GAIA frame as timestamped hex (Phase 2 tool for
@@ -85,7 +85,7 @@ observing BLE traffic while the radio is in FM RX):
 
 ```bash
 # Register all notification classes so the radio pushes everything it has.
-benshi sniff AA:BB:CC:DD:EE:FF \
+bendio sniff AA:BB:CC:DD:EE:FF \
   --register HT_STATUS_CHANGED \
   --register HT_CH_CHANGED \
   --register HT_SETTINGS_CHANGED \
@@ -97,8 +97,8 @@ benshi sniff AA:BB:CC:DD:EE:FF \
 
 ```python
 import asyncio
-from benshi import Radio
-from benshi import protocol as p
+from bendio import Radio
+from bendio import protocol as p
 
 async def main():
     async with Radio("AA:BB:CC:DD:EE:FF") as radio:
@@ -115,8 +115,8 @@ asyncio.run(main())
 ## Project layout
 
 ```
-benshi/
-├── benshi/
+bendio/
+├── bendio/
 │   ├── protocol/       # vendored from benlink (Apache-2.0) — see NOTICE
 │   ├── link.py         # BLE transport via bleak + CoreBluetooth
 │   ├── radio.py        # high-level async API, command/reply matching
@@ -154,14 +154,14 @@ or by giving up on Classic Bluetooth for these radios and pushing the
 vendor to ship a BLE audio characteristic.
 
 Today: fine. Long-term: a ticking risk on the Classic BT half of the
-library. BLE control (`benshi/link.py`) is unaffected.
+library. BLE control (`bendio/link.py`) is unaffected.
 
 ## Roadmap
 
 - **Phase 1 (done):** BLE control — device info, channel dump, settings,
   notifications. Cross-checked against the HTCommander protocol doc.
-- **Phase 2 (done):** Put the radio in FM RX, ran `benshi sniff` and
-  `benshi sniff-all`, committed the trace to `docs/ble_fm_rx_trace.md`.
+- **Phase 2 (done):** Put the radio in FM RX, ran `bendio sniff` and
+  `bendio sniff-all`, committed the trace to `docs/ble_fm_rx_trace.md`.
   Confirmed audio is not on BLE on any service, including an undocumented
   vendor service this library is the first to inspect.
 - **Phase 3 (done):** RFCOMM SPP audio via PyObjC + `IOBluetoothRFCOMMChannel`.
@@ -191,13 +191,13 @@ library. BLE control (`benshi/link.py`) is unaffected.
   handle differently would surface here. Not a blocker for using the
   library, but a high-value correctness check once a Linux/Windows
   host with the radio is at hand.
-- **Swift or Dart port** of the Python library, so the `benshi_mac`
+- **Swift or Dart port** of the Python library, so the `bendio`
   code becomes reusable from a native Mac app (Swift/SwiftUI) or from
   HTCommander-X Flutter. The Python version stays as the executable
   spec and keeps the reverse-engineering loop tight.
 - **Spacebar PTT UX** for the CLI — the plan originally called for
-  `benshi ptt` as hold-to-talk. Currently implemented as
-  `benshi rfcomm-tx-mic --duration N`, which works but is
+  `bendio ptt` as hold-to-talk. Currently implemented as
+  `bendio rfcomm-tx-mic --duration N`, which works but is
   duration-bounded rather than interactive.
 - **IOBluetooth fallback plan.** See the caveat above — Apple has
   deprecated the framework with no CoreBluetooth equivalent for
@@ -207,7 +207,7 @@ library. BLE control (`benshi/link.py`) is unaffected.
 ## References
 
 - [benlink](https://github.com/khusmann/benlink) — Python reference whose
-  `protocol/` subtree is vendored into `benshi/protocol/` (Apache-2.0).
+  `protocol/` subtree is vendored into `bendio/protocol/` (Apache-2.0).
   Our BLE control pattern tracks `BleCommandLink` closely.
 - [HTCommander](https://github.com/Ylianst/HTCommander) — C# reference
   implementation by Ylian Saint-Hilaire. Source of the HDLC audio framing
@@ -226,6 +226,6 @@ references) are collected in [`docs/PROTOCOL_NOTES.md`](docs/PROTOCOL_NOTES.md).
 This project is licensed under the **Apache License 2.0**. See the `LICENSE`
 file for the full text and the `NOTICE` file for attributions.
 
-The `benshi/protocol/` subtree is vendored from benlink (also Apache-2.0).
+The `bendio/protocol/` subtree is vendored from benlink (also Apache-2.0).
 A copy of the upstream license is retained as `LICENSE.benlink` for
 provenance.

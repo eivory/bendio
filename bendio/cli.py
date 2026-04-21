@@ -63,7 +63,7 @@ def _cmd_audio_devices(args: argparse.Namespace) -> int:
             print(_fmt(i, d, "output"))
     print("\n* marks the current system default for that direction.")
     print("Pass either the index or a unique substring of the name to")
-    print("  --device on `benshi rfcomm-play` or `benshi rfcomm-tx-mic`.")
+    print("  --device on `bendio rfcomm-play` or `bendio rfcomm-tx-mic`.")
     return 0
 
 
@@ -93,7 +93,7 @@ async def _cmd_scan(args: argparse.Namespace) -> int:
                 "per-device UUID instead. If your radio is already paired\n"
                 "in System Settings, it may not advertise while connected.\n"
                 "Either unpair it temporarily, or use its paired UUID\n"
-                "directly with 'benshi connect <UUID>'."
+                "directly with 'bendio connect <UUID>'."
             )
         return 1
 
@@ -825,7 +825,7 @@ def _cmd_rfcomm_dump(args: argparse.Namespace) -> int:
 
 def _cmd_rfcomm_probe(args: argparse.Namespace) -> int:
     """Phase 3a: list paired devices / enumerate SDP services / try a channel."""
-    # Import lazily so `benshi --help` still works on non-Darwin hosts or
+    # Import lazily so `bendio --help` still works on non-Darwin hosts or
     # when IOBluetooth isn't installed.
     from .audio import macos_rfcomm as rf
 
@@ -1011,7 +1011,7 @@ def _print_bitfield(obj: object, indent: str = "") -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="benshi")
+    parser = argparse.ArgumentParser(prog="bendio")
     parser.add_argument(
         "-v", "--verbose", action="count", default=0, help="-v info, -vv debug"
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from benshi import Radio
+from bendio import Radio
 
 
 async def main(address: str) -> None:

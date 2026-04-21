@@ -13,8 +13,8 @@ import signal
 import sys
 import time
 
-from benshi import Radio
-from benshi import protocol as p
+from bendio import Radio
+from bendio import protocol as p
 
 ALL_EVENTS = [
     p.EventType.HT_STATUS_CHANGED,

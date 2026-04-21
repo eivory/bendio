@@ -24,20 +24,20 @@ and versioning follows [SemVer](https://semver.org/).
 
 ### Added
 - BLE control (GAIA protocol) via `bleak`
-  - `benshi.Radio`: async context manager with command/reply matching
-  - `benshi.BleLink`: low-level BLE transport
-  - Vendored `benshi/protocol/` from benlink (Apache-2.0)
+  - `bendio.Radio`: async context manager with command/reply matching
+  - `bendio.BleLink`: low-level BLE transport
+  - Vendored `bendio/protocol/` from benlink (Apache-2.0)
 - Classic Bluetooth RFCOMM audio on macOS
-  - `benshi.audio.macos_rfcomm.dump_rfcomm` — read-only streaming
-  - `benshi.audio.macos_rfcomm.transmit_rfcomm` — batch write
-  - `benshi.audio.macos_rfcomm.RfcommTxSession` — streaming write
-  - `benshi.audio.macos_rfcomm.RfcommChannel` discovery + SDP inspect
+  - `bendio.audio.macos_rfcomm.dump_rfcomm` — read-only streaming
+  - `bendio.audio.macos_rfcomm.transmit_rfcomm` — batch write
+  - `bendio.audio.macos_rfcomm.RfcommTxSession` — streaming write
+  - `bendio.audio.macos_rfcomm.RfcommChannel` discovery + SDP inspect
   - macOS TCC workaround script (`scripts/mac_bluetooth_setup.py`)
 - Audio framing + codec
-  - `benshi.audio.framing` — HDLC-style 0x7E/0x7D deframer + builder
-  - `benshi.audio.sbc.SbcStream` — ffmpeg-backed streaming SBC decode
-  - `benshi.audio.sbc.SbcEncodeStream` — ffmpeg-backed streaming SBC encode
-- CLI: `benshi scan | connect | channels | sniff | sniff-all |
+  - `bendio.audio.framing` — HDLC-style 0x7E/0x7D deframer + builder
+  - `bendio.audio.sbc.SbcStream` — ffmpeg-backed streaming SBC decode
+  - `bendio.audio.sbc.SbcEncodeStream` — ffmpeg-backed streaming SBC encode
+- CLI: `bendio scan | connect | channels | sniff | sniff-all |
   rfcomm-probe | rfcomm-inspect | rfcomm-dump | rfcomm-sbc-dump |
   rfcomm-play | rfcomm-tx-tone | rfcomm-tx-mic | audio-devices`
 - Examples: `01_device_info.py`, `02_sniff_fm_rx.py`, `03_listen.py`,
@@ -50,5 +50,5 @@ and versioning follows [SemVer](https://semver.org/).
 - `REGISTER_NOTIFICATION` receives a 1-byte status reply on the UV-PRO
   (contradicts benlink's `body_disc` assertion that it cannot be a reply).
 
-[Unreleased]: https://github.com/eivory/benshi/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/eivory/benshi/releases/tag/v0.1.0
+[Unreleased]: https://github.com/eivory/bendio/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/eivory/bendio/releases/tag/v0.1.0
