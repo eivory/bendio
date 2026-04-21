@@ -109,3 +109,62 @@ Without this packet following a TX, the radio stays wedged in TX
 mode. We send it 3 times with 50 ms between and then wait 1.5 s
 before closing the channel, to make sure the radio has received and
 acted on it before the BT stack tears down.
+
+## `is_radio` status bit distinguishes broadcast FM from ham mode
+
+The UV-PRO is two radios in one: the amateur transceiver (VHF/UHF FM
+voice) and a broadcast FM receiver (88–108 MHz). The ``is_radio`` bit
+in ``Status`` / ``StatusExt`` signals which mode is active:
+
+- ``is_radio = False`` → ham transceiver mode. ``is_in_rx`` / ``is_sq``
+  / ``is_in_tx`` / ``curr_ch_id_*`` / ``rssi`` are meaningful.
+- ``is_radio = True`` → broadcast FM mode. ``is_in_rx`` stays False,
+  ``curr_ch_id_*`` is zero, ``rssi`` is zero — the ham-side fields
+  don't track broadcast FM state.
+
+Confirmed empirically by sending ``REGISTER_NOTIFICATION(HT_STATUS_CHANGED)``
+and switching the HT between modes.
+
+## Broadcast FM audio is speaker-only — it does not leave the HT
+
+When the UV-PRO is playing a broadcast FM station, the audio is
+**internal-speaker-only**. No audio flows over Bluetooth at all —
+confirmed against:
+
+- Every notify characteristic on every BLE service, including the
+  undocumented ``00000001-ba2a-…`` vendor service (captured via
+  ``bendio sniff-all``, 30 s silence during broadcast playback).
+- RFCOMM channel 2 ("BS AOC"), the normal audio channel — zero bytes
+  during broadcast FM playback (captured via ``bendio rfcomm-dump``).
+
+No amount of channel-opening or handshaking from the host side makes
+broadcast audio appear on any Bluetooth transport. This is a firmware
+limitation; the HT vendor chose not to wire broadcast FM into the BT
+audio path. If that changes in a future firmware we'd learn of it
+from an audio-rate burst on one of these channels; until then,
+broadcast audio is outside our reach.
+
+## TX power cycling emits three event classes
+
+Cycling the TX power setting through Low → Medium → High → Low on the
+HT produces a characteristic burst of BLE events per transition:
+
+1. **HT_SETTINGS_CHANGED** (event_type = 6) — 22 bytes of Settings
+   bitfield. Fires whenever any user setting changes.
+2. **HT_CH_CHANGED** (event_type = 5) — the full ``RfCh`` bitfield for
+   the active channel. The ``tx_at_max_power`` / ``tx_at_med_power``
+   bits in ``RfCh`` encode the power level, so a re-emit of the whole
+   channel makes sense; a single byte (~offset 18 into RfCh) differs
+   between Low / Medium / High.
+3. **EXTENDED ``GET_DEV_STATE_VAR`` (0x4003)** — 13-byte packets, four
+   of them within ~550 ms after each power change. Layout:
+   ``00 0A 40 03 06 00 00 00 00 00 00 01 XX XX`` where the last two
+   bytes vary. This is the first EXTENDED-group traffic this library
+   has captured from the radio. Hypothesis: a fast-sample state
+   variable (PA power level? forward-power reading?) that the radio
+   pushes at ~7 Hz for a short window after the setting changes.
+   Worth a dedicated capture to correlate the trailing bytes against
+   known values.
+
+Nothing here causes problems for the audio pipeline, but it's useful
+context when building a UI that tracks radio state.
