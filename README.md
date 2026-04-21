@@ -172,7 +172,31 @@ library. BLE control (`benshi/link.py`) is unaffected.
   `SbcEncodeStream`, `Deframer`, `build_audio_packet`) are stable and
   composable; `examples/` covers device info, sniff, listen, and PTT.
   TODO: a top-level `BenshiRadio` facade that unifies BLE control +
-  audio behind one async context manager.
+  audio behind one async context manager, in the shape of benlink's
+  `RadioController` but extended to expose `.audio.start_rx()` /
+  `.audio.start_tx()` (which benlink never finished).
+
+## Future work
+
+- **Cross-check against HTCommander-X on Linux/Windows.** Run the
+  reference Dart implementation against the same physical radio,
+  compare: does it see the same `GET_DEV_INFO` bytes? Does it dump
+  the same channel table byte-for-byte? Any protocol nuances we
+  handle differently would surface here. Not a blocker for using the
+  library, but a high-value correctness check once a Linux/Windows
+  host with the radio is at hand.
+- **Swift or Dart port** of the Python library, so the `benshi_mac`
+  code becomes reusable from a native Mac app (Swift/SwiftUI) or from
+  HTCommander-X Flutter. The Python version stays as the executable
+  spec and keeps the reverse-engineering loop tight.
+- **Spacebar PTT UX** for the CLI — the plan originally called for
+  `benshi ptt` as hold-to-talk. Currently implemented as
+  `benshi rfcomm-tx-mic --duration N`, which works but is
+  duration-bounded rather than interactive.
+- **IOBluetooth fallback plan.** See the caveat above — Apple has
+  deprecated the framework with no CoreBluetooth equivalent for
+  RFCOMM. Worth scoping a DriverKit-based shim or other alternative
+  before Apple removes the API, not after.
 
 ## References
 
