@@ -20,6 +20,62 @@ import typing as t
 
 log = logging.getLogger(__name__)
 
+
+def _cmd_audio_devices(args: argparse.Namespace) -> int:
+    """List input/output devices visible to sounddevice, marking defaults."""
+    try:
+        import sounddevice as sd  # type: ignore
+    except ImportError:
+        print(
+            "sounddevice not installed. Run: pip install sounddevice",
+            file=sys.stderr,
+        )
+        return 4
+    try:
+        default_in, default_out = sd.default.device
+    except Exception:
+        default_in, default_out = (None, None)
+    devs = sd.query_devices()
+
+    def _fmt(i: int, d: dict, role: str) -> str:
+        in_ch = d.get("max_input_channels", 0)
+        out_ch = d.get("max_output_channels", 0)
+        rate = int(d.get("default_samplerate", 0))
+        is_default = (
+            (role == "input" and i == default_in)
+            or (role == "output" and i == default_out)
+        )
+        mark = "*" if is_default else " "
+        return f"  {mark} [{i:2d}] {d['name']!r} ({in_ch} in / {out_ch} out ch, {rate} Hz)"
+
+    print("Input devices:")
+    for i, d in enumerate(devs):
+        if d.get("max_input_channels", 0) > 0:
+            print(_fmt(i, d, "input"))
+    print("\nOutput devices:")
+    for i, d in enumerate(devs):
+        if d.get("max_output_channels", 0) > 0:
+            print(_fmt(i, d, "output"))
+    print("\n* marks the current system default for that direction.")
+    print("Pass either the index or a unique substring of the name to")
+    print("  --device on `benshi rfcomm-play` or `benshi rfcomm-tx-mic`.")
+    return 0
+
+
+def _parse_sd_device(s):
+    """Coerce a --device CLI value into the form sounddevice expects.
+
+    Integers should be passed as ``int`` (selects device by index);
+    non-numeric strings are passed through as-is (matched by substring
+    against device name).
+    """
+    if s is None:
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        return s
+
 from . import protocol as p
 from .link import scan as ble_scan, RADIO_SERVICE_UUID
 from .radio import Radio
@@ -254,6 +310,144 @@ def _generate_ce3k_pcm(
     return bytes(out)
 
 
+def _cmd_rfcomm_tx_mic(args: argparse.Namespace) -> int:
+    """Phase 3e-2: live mic capture → streaming SBC encode → RFCOMM TX.
+
+    Pipeline: sounddevice mic callback → ffmpeg (streaming PCM→SBC) →
+    HDLC wrap per frame → writeSync_length_ on the RFCOMM channel.
+
+    ``writeSync`` is thread-safe on IOBluetoothRFCOMMChannel, so the
+    mic audio thread and ffmpeg stdout reader thread call into the
+    channel object directly; the main thread pumps the runloop for
+    IOBluetooth delegate callbacks and watches for stop.
+    """
+    import threading
+    import queue
+
+    from .audio import macos_rfcomm as rf
+    from .audio.framing import build_audio_packet, END_OF_TX_PACKET
+    from .audio.sbc import SbcEncodeStream, SbcUnavailable
+    try:
+        import sounddevice as sd  # type: ignore
+    except ImportError:
+        print(
+            "sounddevice not installed. Run: pip install sounddevice",
+            file=sys.stderr,
+        )
+        return 4
+
+    # --- open RFCOMM first; bail cheaply if the radio isn't accepting us ---
+    session = rf.RfcommTxSession(args.address, args.channel)
+    print(f"Opening RFCOMM ch {args.channel} on {args.address}...", flush=True)
+    open_result = session.open(open_timeout=args.open_timeout)
+    if not open_result.opened:
+        print(
+            f"RFCOMM open failed: phase={open_result.phase} "
+            f"IOReturn={open_result.open_status}",
+            file=sys.stderr,
+        )
+        return 2
+    print("Channel open. Radio should now be ready for audio.", flush=True)
+
+    stop_flag = threading.Event()
+
+    # Counters (plain lists for nonlocal-y state from multiple threads;
+    # they're monotonic increments so races just slightly misreport).
+    total_pcm_bytes = [0]
+    total_sbc_frames = [0]
+    total_packets = [0]
+
+    def prev_sigint(_signum, _frame):
+        stop_flag.set()
+
+    prev = signal.signal(signal.SIGINT, prev_sigint)
+
+    def on_sbc_frame(frame: bytes) -> None:
+        # Wrap and ship. Called on ffmpeg's stdout reader thread.
+        pkt = build_audio_packet(frame)
+        session.write(pkt)
+        total_sbc_frames[0] += 1
+        total_packets[0] += 1
+
+    try:
+        encoder = SbcEncodeStream(on_frame=on_sbc_frame)
+    except SbcUnavailable as exc:
+        print(f"SBC encoder unavailable: {exc}", file=sys.stderr)
+        session.close(tail_packet=END_OF_TX_PACKET, post_drain_s=0.5)
+        signal.signal(signal.SIGINT, prev)
+        return 3
+
+    def mic_callback(indata, frames, time_info, status):
+        # Called on sounddevice's audio thread. `indata` is a buffer of
+        # bytes (dtype=int16, channels=1). Forward to encoder stdin.
+        if status:
+            log.warning("mic stream status: %s", status)
+        # RawInputStream hands us a CFFI CData buffer; coerce to bytes.
+        encoder.feed(bytes(indata))
+        total_pcm_bytes[0] += len(indata)
+
+    input_stream = sd.RawInputStream(
+        samplerate=32000,
+        channels=1,
+        dtype="int16",
+        blocksize=128,  # one SBC-frame worth per callback (≈4 ms)
+        callback=mic_callback,
+        device=_parse_sd_device(args.device),
+    )
+
+    print(
+        f"Starting mic ({input_stream.samplerate:.0f} Hz mono). "
+        f"{'Recording for ' + str(args.duration) + ' s.' if args.duration else 'Press Ctrl-C to stop.'}",
+        flush=True,
+    )
+    input_stream.start()
+
+    t_start = time.monotonic()
+    last_report = [t_start]
+    try:
+        while not stop_flag.is_set():
+            session.pump(0.1)
+            now = time.monotonic()
+            if args.duration and (now - t_start) >= args.duration:
+                break
+            if now - last_report[0] > 1.0:
+                last_report[0] = now
+                print(
+                    f"[{now - t_start:6.2f}s] pcm_in={total_pcm_bytes[0]}B "
+                    f"sbc_frames={total_sbc_frames[0]} "
+                    f"pkts_sent={total_packets[0]} "
+                    f"write_errors={session.write_errors}",
+                    flush=True,
+                )
+    finally:
+        signal.signal(signal.SIGINT, prev)
+        print("Stopping mic and flushing encoder...", flush=True)
+        input_stream.stop()
+        input_stream.close()
+        encoder.close()
+        # Give the encoder's reader thread a moment to drain any remaining
+        # SBC output and call session.write() for the last few frames.
+        time.sleep(0.2)
+        session.pump(0.2)
+
+        print("Sending end-of-TX and closing channel...", flush=True)
+        session.close(
+            tail_packet=END_OF_TX_PACKET,
+            tail_repeats=3,
+            tail_interval_s=0.05,
+            post_drain_s=1.5,
+        )
+
+    print(
+        f"Done. pcm_in={total_pcm_bytes[0]}B "
+        f"sbc_frames={total_sbc_frames[0]} "
+        f"pkts_sent={total_packets[0]} "
+        f"write_errors={session.write_errors}",
+        flush=True,
+    )
+    return 0
+
+
 def _cmd_rfcomm_tx_tone(args: argparse.Namespace) -> int:
     """Phase 3e-1: batch-TX a sine-wave test tone and prove the full TX path."""
     from .audio import macos_rfcomm as rf
@@ -417,6 +611,7 @@ def _cmd_rfcomm_play(args: argparse.Namespace) -> int:
         dtype="int16",
         blocksize=128,
         latency="low",
+        device=_parse_sd_device(args.device),
     )
     pcm_stream.start()
 
@@ -893,7 +1088,38 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("address", help="BT Classic MAC")
     rp.add_argument("--channel", type=int, default=2)
     rp.add_argument("--open-timeout", type=float, default=10.0)
+    rp.add_argument(
+        "--device", default=None,
+        help="sounddevice output device name or index. Default: system "
+             "default output. Run `python -c \"import sounddevice; "
+             "print(sounddevice.query_devices())\"` to list.",
+    )
     rp.set_defaults(func=_cmd_rfcomm_play)
+
+    ad = sub.add_parser(
+        "audio-devices",
+        help="List input and output devices visible to sounddevice",
+    )
+    ad.set_defaults(func=_cmd_audio_devices)
+
+    rm = sub.add_parser(
+        "rfcomm-tx-mic",
+        help="Phase 3e-2: live mic capture → streaming SBC → RFCOMM TX",
+    )
+    rm.add_argument("address", help="BT Classic MAC")
+    rm.add_argument("--channel", type=int, default=2)
+    rm.add_argument(
+        "--duration", type=float, default=None,
+        help="Auto-stop after N seconds. Default: run until Ctrl-C.",
+    )
+    rm.add_argument(
+        "--device", default=None,
+        help="sounddevice input device name or index. Default: system default "
+             "input. Run `python -c \"import sounddevice; "
+             "print(sounddevice.query_devices())\"` to list.",
+    )
+    rm.add_argument("--open-timeout", type=float, default=10.0)
+    rm.set_defaults(func=_cmd_rfcomm_tx_mic)
 
     rt = sub.add_parser(
         "rfcomm-tx-tone",

@@ -26,8 +26,11 @@ import shutil
 import sys
 from pathlib import Path
 
-USAGE_DESCRIPTION = (
+BT_USAGE = (
     "benshi uses Bluetooth Low Energy to control a paired ham radio."
+)
+MIC_USAGE = (
+    "benshi captures microphone audio to transmit over the ham radio."
 )
 
 
@@ -57,18 +60,20 @@ def patch_plist(plist_path: Path) -> bool:
     with plist_path.open("rb") as f:
         data = plistlib.load(f)
     already = (
-        data.get("NSBluetoothAlwaysUsageDescription") == USAGE_DESCRIPTION
+        data.get("NSBluetoothAlwaysUsageDescription") == BT_USAGE
+        and data.get("NSMicrophoneUsageDescription") == MIC_USAGE
         and data.get("CFBundleIdentifier") == BUNDLE_ID
     )
     if already:
         return False
-    data["NSBluetoothAlwaysUsageDescription"] = USAGE_DESCRIPTION
-    data["NSBluetoothPeripheralUsageDescription"] = USAGE_DESCRIPTION
+    data["NSBluetoothAlwaysUsageDescription"] = BT_USAGE
+    data["NSBluetoothPeripheralUsageDescription"] = BT_USAGE
+    data["NSMicrophoneUsageDescription"] = MIC_USAGE
     # Unique bundle ID so macOS treats this as a distinct app for TCC purposes
     # and prompts fresh instead of inheriting org.python.python's state.
     data["CFBundleIdentifier"] = BUNDLE_ID
     data["CFBundleName"] = "benshi"
-    data["CFBundleDisplayName"] = "benshi (Python for Bluetooth)"
+    data["CFBundleDisplayName"] = "benshi (Python for Bluetooth + mic)"
     with plist_path.open("wb") as f:
         plistlib.dump(data, f)
     return True
@@ -130,12 +135,14 @@ def main() -> int:
     else:
         print("codesign OK")
 
-    # Clear any previously denied TCC decision for this bundle ID.
-    subprocess.run(
-        ["tccutil", "reset", "Bluetooth", BUNDLE_ID],
-        capture_output=True,
-        text=True,
-    )
+    # Clear any previously denied TCC decision for this bundle ID — both
+    # Bluetooth and Microphone services, so approvals prompt fresh.
+    for service in ("Bluetooth", "Microphone"):
+        subprocess.run(
+            ["tccutil", "reset", service, BUNDLE_ID],
+            capture_output=True,
+            text=True,
+        )
 
     print("\nDone.")
     print(

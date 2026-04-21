@@ -473,6 +473,187 @@ def inspect_services(address: str, timeout: float = 10.0) -> list[InspectedServi
     return out
 
 
+class RfcommTxSession:
+    """Long-lived RFCOMM write session for streaming TX.
+
+    Caller pattern::
+
+        session = RfcommTxSession(address, channel)
+        session.open()                       # blocks until open-complete
+        # start mic → encoder → session.write() pipeline on other threads
+        while not user_stopped():
+            session.pump(0.05)               # drive the main-thread runloop
+        session.close(tail_packet=END_OF_TX_PACKET)
+
+    ``write`` is safe to call from any thread (Apple documents
+    ``IOBluetoothRFCOMMChannel``'s ``-writeSync:length:`` as thread-safe).
+    ``pump`` must be called from the thread that opened the session —
+    typically the main thread — to drive delegate callbacks.
+    """
+
+    def __init__(self, address: str, channel: int) -> None:
+        _require_iobluetooth()
+        self._address = address
+        self._channel_id = channel
+        self._ch = None  # IOBluetoothRFCOMMChannel
+        self._delegate = None
+        self._open_result: Optional[OpenAttemptResult] = None
+        self._write_errors = 0
+
+    @property
+    def write_errors(self) -> int:
+        return self._write_errors
+
+    @property
+    def opened(self) -> bool:
+        return self._delegate is not None and bool(self._delegate.was_opened)
+
+    def open(
+        self,
+        on_data: "Optional[callable[[float, bytes], None]]" = None,
+        *,
+        open_timeout: float = 10.0,
+    ) -> OpenAttemptResult:
+        import objc  # type: ignore
+        from Foundation import NSObject  # type: ignore
+
+        t_open: list[float] = []
+
+        class _Delegate(NSObject):
+            def init(self):  # type: ignore[override]
+                self = objc.super(_Delegate, self).init()
+                if self is None:
+                    return None
+                self.open_status = None
+                self.was_opened = False
+                self.is_open = False
+                self.closed = False
+                return self
+
+            def rfcommChannelOpenComplete_status_(self, ch, status):  # noqa: N802
+                self.open_status = int(status)
+                if status == 0:
+                    self.was_opened = True
+                    self.is_open = True
+                    t_open.append(time.monotonic())
+
+            def rfcommChannelClosed_(self, ch):  # noqa: N802
+                self.is_open = False
+                self.closed = True
+
+            def rfcommChannelData_data_length_(self, ch, data, length):  # noqa: N802
+                if on_data is None or length <= 0 or data is None:
+                    return
+                try:
+                    chunk = bytes(data[:length])
+                except Exception:
+                    try:
+                        chunk = bytes(data)[:length]
+                    except Exception:
+                        return
+                t_rel = (
+                    time.monotonic() - t_open[0]
+                    if t_open
+                    else 0.0
+                )
+                try:
+                    on_data(t_rel, chunk)
+                except Exception:
+                    log.exception("on_data callback raised")
+
+        dev = _device_by_address(self._address)
+        delegate = _Delegate.alloc().init()
+        try:
+            status, ch = dev.openRFCOMMChannelAsync_withChannelID_delegate_(
+                None, self._channel_id, delegate
+            )
+        except Exception as exc:
+            self._open_result = OpenAttemptResult(
+                address=self._address, channel=self._channel_id,
+                opened=False, open_status=None,
+                phase=f"open_call_exception:{exc!r}",
+            )
+            return self._open_result
+        if status != 0:
+            self._open_result = OpenAttemptResult(
+                address=self._address, channel=self._channel_id,
+                opened=False, open_status=int(status), phase="open_call",
+            )
+            return self._open_result
+
+        deadline = time.monotonic() + open_timeout
+        while time.monotonic() < deadline:
+            _pump_runloop(0.1)
+            if delegate.open_status is not None:
+                break
+        if not delegate.was_opened:
+            try:
+                if ch is not None:
+                    ch.closeChannel()
+            except Exception:
+                pass
+            self._open_result = OpenAttemptResult(
+                address=self._address, channel=self._channel_id,
+                opened=False, open_status=delegate.open_status, phase="timeout",
+            )
+            return self._open_result
+
+        self._ch = ch
+        self._delegate = delegate
+        self._open_result = OpenAttemptResult(
+            address=self._address, channel=self._channel_id,
+            opened=True, open_status=0, phase="open_complete",
+        )
+        return self._open_result
+
+    def write(self, packet: bytes) -> int:
+        """Synchronously write one RFCOMM packet. Returns IOReturn (0 = OK)."""
+        if self._ch is None:
+            raise RuntimeError("channel not open")
+        try:
+            status = self._ch.writeSync_length_(packet, len(packet))
+        except Exception:
+            log.exception("writeSync_length_ raised")
+            self._write_errors += 1
+            return -1
+        if status != 0:
+            self._write_errors += 1
+        return int(status)
+
+    def pump(self, seconds: float = 0.05) -> None:
+        """Pump the main-thread runloop. Call from the thread that opened()."""
+        _pump_runloop(seconds)
+
+    def close(
+        self,
+        *,
+        tail_packet: "Optional[bytes]" = None,
+        tail_repeats: int = 3,
+        tail_interval_s: float = 0.05,
+        post_drain_s: float = 1.5,
+    ) -> None:
+        """Send the tail frame (repeated), drain, then close the channel."""
+        if self._ch is None:
+            return
+        try:
+            if tail_packet is not None:
+                for _ in range(max(1, tail_repeats)):
+                    self.write(tail_packet)
+                    _pump_runloop(tail_interval_s)
+            _pump_runloop(post_drain_s)
+        finally:
+            try:
+                if not self._delegate.closed:
+                    self._ch.closeChannel()
+            except Exception:
+                log.exception("closeChannel raised")
+            for _ in range(20):
+                if self._delegate.closed:
+                    break
+                _pump_runloop(0.05)
+            self._ch = None
+
+
 def transmit_rfcomm(
     address: str,
     channel: int,

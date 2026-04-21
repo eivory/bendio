@@ -159,6 +159,150 @@ class SbcStream:
 Sbc = SbcStream
 
 
+class SbcEncodeStream:
+    """Streaming PCM → SBC encoder. Symmetric to :class:`SbcStream`.
+
+    Feed raw s16le PCM to :meth:`feed`; receive one 44-byte SBC frame at a
+    time through the ``on_frame`` callback. Internally the same ffmpeg
+    binary and low-latency flags; output is sliced into frames on the fly
+    so downstream code doesn't have to resync on the 0x9C sync byte.
+
+    Threading: ``on_frame`` is invoked on our internal stdout reader
+    thread, not the caller's thread.
+    """
+
+    # For this radio's fixed codec config (32 kHz / 16 blocks / mono /
+    # loudness / 8 subbands / bitpool 18) every frame is exactly 44 bytes.
+    FRAME_LEN = 44
+
+    def __init__(
+        self,
+        on_frame: Callable[[bytes], None],
+        *,
+        sample_rate: int = 32000,
+        channels: int = 1,
+        bitrate: str = "88k",
+    ) -> None:
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            raise SbcUnavailable(
+                "ffmpeg not found on PATH. Install with: brew install ffmpeg"
+            )
+        self._on_frame = on_frame
+        self._proc = subprocess.Popen(
+            [
+                ffmpeg_path,
+                "-loglevel", "error",
+                "-hide_banner",
+                "-nostdin",
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-probesize", "32",
+                "-analyzeduration", "0",
+                "-f", "s16le",
+                "-ar", str(sample_rate),
+                "-ac", str(channels),
+                "-i", "pipe:0",
+                "-c:a", "sbc",
+                "-b:a", bitrate,
+                "-f", "sbc",
+                "-flush_packets", "1",
+                "pipe:1",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self._buf = bytearray()
+        self._closed = False
+        self._reader = threading.Thread(
+            target=self._read_loop, name="sbc-enc-stdout", daemon=True
+        )
+        self._err_reader = threading.Thread(
+            target=self._err_loop, name="sbc-enc-stderr", daemon=True
+        )
+        self._reader.start()
+        self._err_reader.start()
+
+    def feed(self, pcm_bytes: bytes) -> None:
+        if self._closed or self._proc.stdin is None:
+            return
+        try:
+            self._proc.stdin.write(pcm_bytes)
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            log.warning("ffmpeg stdin closed early: %r", exc)
+            self._closed = True
+
+    def _read_loop(self) -> None:
+        assert self._proc.stdout is not None
+        while True:
+            chunk = self._proc.stdout.read(4096)
+            if not chunk:
+                # Drain anything left in the buffer as long as it's a
+                # complete frame.
+                while len(self._buf) >= self.FRAME_LEN:
+                    self._emit_one()
+                return
+            self._buf.extend(chunk)
+            while len(self._buf) >= self.FRAME_LEN:
+                if self._buf[0] != 0x9C:
+                    # Shouldn't happen — ffmpeg emits back-to-back frames —
+                    # but resync just in case.
+                    idx = self._buf.find(0x9C, 1)
+                    if idx < 0:
+                        self._buf.clear()
+                        break
+                    del self._buf[:idx]
+                    continue
+                self._emit_one()
+
+    def _emit_one(self) -> None:
+        frame = bytes(self._buf[: self.FRAME_LEN])
+        del self._buf[: self.FRAME_LEN]
+        try:
+            self._on_frame(frame)
+        except Exception:
+            log.exception("on_frame callback raised")
+
+    def _err_loop(self) -> None:
+        assert self._proc.stderr is not None
+        for line in iter(self._proc.stderr.readline, b""):
+            try:
+                s = line.decode("utf-8", "replace").rstrip()
+            except Exception:
+                s = repr(line)
+            if s:
+                log.warning("ffmpeg: %s", s)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._proc.stdin and not self._proc.stdin.closed:
+                self._proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            self._proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
+
+    def __enter__(self) -> "SbcEncodeStream":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 def encode_pcm_to_sbc(
     pcm_bytes: bytes,
     *,
